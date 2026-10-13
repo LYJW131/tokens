@@ -4,8 +4,9 @@ Claude Code on the web runs the agent in a cloud VM, not on your machine, so
 `tokens serve` never sees that usage. `tokens cloud submit` reports it from
 inside the VM, at the end of each turn.
 
-Codex cloud is not supported: the agent does not run in its container, so there
-is nothing there to report (see [Codex cloud](#codex-cloud)).
+Codex cloud is not supported: in its current environments the agent does not run
+in the container, so there is nothing there to report (see
+[Codex cloud](#codex-cloud)).
 
 ## What is sent, and what is not
 
@@ -117,9 +118,10 @@ overtakes it, never counted twice.
 
 ## Codex cloud
 
-Not supported. In Codex cloud the agent loop runs on OpenAI's side; the
-environment's container only runs `codex exec-server --remote …` to execute the
-agent's commands. So in the container:
+Not supported. In Codex cloud environments (Settings › Codex cloud in ChatGPT)
+the agent loop runs on OpenAI's side; the environment's container only runs
+`codex exec-server --remote …` to execute the agent's commands. So in the
+container:
 
 - there are no rollout files (`rollout-*.jsonl`) anywhere, and `CODEX_HOME`
   (`/run/codex-environment/codex-home`) holds only `auth.json` — the CLI has no
@@ -131,6 +133,9 @@ agent's commands. So in the container:
 the agent's commands, so a session could be named, but its usage would have to
 come from somewhere other than the container. The `codex` provider stays in the
 CLI and the server for that case.
+
+Legacy Codex cloud environments (Settings › Codex cloud (legacy)), still used
+for code review and the Linear and GitHub integrations, were not tested.
 
 ## Other cloud agents
 
