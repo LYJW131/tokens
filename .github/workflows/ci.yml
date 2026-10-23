@@ -19,6 +19,17 @@ name: CI
 # merge; a *job* skipped by an `if:` reports the "skipped" conclusion, which
 # branch protection accepts. Always starting the workflow is what buys that,
 # and it costs one ~20s runner on a change that touches neither tree.
+#
+# One caveat, measured rather than assumed (PR #102): that guarantee holds for
+# `web`, but not for the matrix. A skipped matrix job never evaluates its
+# matrix, so GitHub cannot expand `name: ${{ matrix.name }}` and reports the
+# three platforms as a single check literally named `matrix.name` instead of
+# Linux/macOS/Windows. Nothing is a required check here today, so this is
+# cosmetic. If Linux, macOS or Windows is ever made required, those names will
+# never report on a web-only PR and will block the merge — at which point move
+# the `if:` off the matrix job and onto its Clippy/Build/Smoke/Test steps, so
+# each platform still reports under its own name for the price of a runner
+# start.
 on:
   pull_request:
   push:
