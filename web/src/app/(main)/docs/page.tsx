@@ -75,9 +75,10 @@ const WINDOWS: readonly DocCommand[] = [
   { command: "bunx tokens-cli@latest submit", note: "submit your usage" },
 ];
 
-// Cloud session setup, kept in step with docs/cloud-sessions.md. Both hooks run
-// async with a timeout, so a submit never holds up a turn and a stalled install
-// or request is killed.
+// Cloud session setup, kept in step with docs/cloud-sessions.md. The CLI is
+// installed once per VM by the setup script; the only hook is an async Stop
+// with a timeout, so a submit never holds up a turn and a stalled request is
+// killed.
 const CLOUD_SETUP_SCRIPT = String.raw`#!/bin/bash
 set -e
 npm i -g tokens-cli@latest
@@ -99,19 +100,6 @@ fs.writeFileSync(file, JSON.stringify(settings, null, 2) + "\n");
 const CLOUD_REPO_HOOKS = JSON.stringify(
   {
     hooks: {
-      SessionStart: [
-        {
-          hooks: [
-            {
-              type: "command",
-              command:
-                '[ "$CLAUDE_CODE_REMOTE" = true ] && ! command -v tokens >/dev/null && npm i -g tokens-cli@latest >/dev/null 2>&1; true',
-              async: true,
-              timeout: 180,
-            },
-          ],
-        },
-      ],
       Stop: [
         {
           hooks: [
@@ -422,7 +410,7 @@ export default function DocsPage() {
               <CardContent>
                 <Tabs defaultValue="setup-script">
                   <TabsList>
-                    <TabsTrigger value="setup-script">Setup script</TabsTrigger>
+                    <TabsTrigger value="setup-script">Setup script (recommended)</TabsTrigger>
                     <TabsTrigger value="repo-hooks">Repository hooks</TabsTrigger>
                   </TabsList>
 
@@ -432,17 +420,23 @@ export default function DocsPage() {
                       the CLI and merges the Stop hook into the container&apos;s{" "}
                       <code>~/.claude/settings.json</code>, so it covers every
                       repository opened in that environment and nothing is
-                      committed.
+                      committed. User-level hooks run in standalone cloud
+                      sessions and in Claude Code project threads alike.
                     </p>
                     <CodeBlock code={CLOUD_SETUP_SCRIPT} label="Setup script" />
                   </TabsContent>
 
                   <TabsContent value="repo-hooks" className="mt-4 flex flex-col gap-3">
                     <p className="text-sm leading-relaxed text-muted-foreground">
-                      Commit to the repository&apos;s{" "}
-                      <code>.claude/settings.json</code>. It applies to that
-                      repository in any environment and installs the CLI itself.
-                      On a local machine both hooks do nothing.
+                      Keep only <code>npm i -g tokens-cli@latest</code> in the
+                      Setup script, so the CLI is installed once per VM, and
+                      commit the Stop hook to the repository&apos;s{" "}
+                      <code>.claude/settings.json</code>. On a local machine it
+                      does nothing.{" "}
+                      <strong className="font-medium text-foreground">
+                        Claude Code project threads do not run repository hooks
+                      </strong>
+                      , so use the setup script if you work in projects.
                     </p>
                     <CodeBlock code={CLOUD_REPO_HOOKS} label=".claude/settings.json" />
                   </TabsContent>
@@ -451,7 +445,7 @@ export default function DocsPage() {
             </Card>
 
             <p className="text-sm leading-relaxed text-muted-foreground">
-              The hooks run async, with a timeout, so a submit never holds up a
+              The hook runs async, with a timeout, so a submit never holds up a
               turn. Use one way, not both. Run{" "}
               <code>tokens cloud status</code> in a session to check it is
               detected. Codex cloud is not supported: its agent does not run in

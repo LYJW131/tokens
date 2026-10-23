@@ -88,15 +88,20 @@ are computed from the remaining pricing sources only.
 
 ### 3. Hooks
 
-The hooks are `async`, so a submit runs in the background and never holds up the
-session, and each has a `timeout` (seconds) so a stalled install or network call
-is killed rather than left running. Pick one of two ways to install them.
+There is only a Stop hook; the CLI is installed once per VM by the setup
+script. The hook is `async`, so a submit runs in the background and never holds
+up the session, and has a `timeout` (seconds) so a stalled network call is
+killed rather than left running. Pick one of two ways to install it; use A if
+you work in Claude Code project threads.
 
-**A. Setup script: every session in this environment.** Paste this into the
-environment's **Setup script**. It installs the CLI and adds the Stop hook to
+**A. Setup script: every session in this environment (recommended).** Paste
+this into the environment's **Setup script**. It installs the CLI and adds the Stop hook to
 the container's user settings (`~/.claude/settings.json`), merged with whatever
-is already there (it stops, without writing, if the CLI install fails or the existing file is not valid JSON), so it covers every repository you open in the environment and
-nothing is committed. The setup script cannot read the environment's variables
+is already there (it stops, without writing, if the CLI install fails or the
+existing file is not valid JSON), so it covers every repository you open in the
+environment and nothing is committed. The setup script runs in every new VM, and
+user-level hooks run in both standalone cloud sessions and the threads of a
+Claude Code project. The setup script cannot read the environment's variables
 or secrets, and does not need to.
 
 ```bash
@@ -119,26 +124,25 @@ fs.writeFileSync(file, JSON.stringify(settings, null, 2) + "\n");
 '
 ```
 
-**B. Hooks file in the repository: every session on this repository.** Commit
-this to the repository's `.claude/settings.json` (merge it in if the file
-exists). It applies to that repository in any environment, and the SessionStart
-hook installs the CLI itself, so no setup script is needed.
+**B. Hooks file in the repository: every session on this repository.** The
+CLI is still installed once per VM by the setup script, which then only needs
+its first lines:
+
+```bash
+#!/bin/bash
+npm i -g tokens-cli@latest
+```
+
+and the Stop hook is committed to the repository's `.claude/settings.json`
+(merge it in if the file exists), so it travels with the repository instead of
+the environment. **Threads in a Claude Code project do not run a repository's
+`.claude/settings.json` hooks**, only the container's user-level ones, so their
+usage is not reported this way; use A for those. Standalone cloud sessions
+(including scheduled ones) do run them.
 
 ```json
 {
   "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "[ \"$CLAUDE_CODE_REMOTE\" = true ] && ! command -v tokens >/dev/null && npm i -g tokens-cli@latest >/dev/null 2>&1; true",
-            "async": true,
-            "timeout": 180
-          }
-        ]
-      }
-    ],
     "Stop": [
       {
         "hooks": [
@@ -161,10 +165,8 @@ submit replaces the session's stored total, but wasted).
 The provider and session are detected from `CLAUDE_CODE_REMOTE` and
 `CLAUDE_CODE_REMOTE_SESSION_ID`. On a local machine `tokens cloud submit` finds
 no cloud session and does nothing, so the committed hooks are safe for
-teammates who work locally. Because the install hook runs in the background,
-the first turn of a fresh session can end before the CLI is installed; that
-turn's usage is still reported, by the next turn's submit, since every submit
-carries the session's whole total.
+teammates who work locally, and the hook does nothing where the CLI is not
+installed.
 
 `tokens cloud status` in the session shows whether it is detected and which
 device it submits as.
