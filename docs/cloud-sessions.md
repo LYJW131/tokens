@@ -68,7 +68,12 @@ the environment's egress proxy rather than to the container:
   the agent, the repository's scripts and anything they install could read it.
   Then add the environment variable `TOKENS_API_TOKEN=injected-by-proxy`: the
   CLI refuses to submit without a token, and this placeholder is the
-  `Authorization` header the proxy replaces with the real one.
+  `Authorization` header the proxy replaces with the real one. This keeps the
+  token from being read or copied out, not from being used: while a session
+  runs, anything in it can still send requests to tokens.ci with your token
+  (as it can with the environment variable), including the ones that delete
+  your submitted data. Only add it to environments whose repositories you
+  trust, and revoke it in Settings if in doubt.
 - **Otherwise: environment variable.** Set `TOKENS_API_TOKEN` to the token
   itself. It works the same, but every process in the session can read it.
 
@@ -90,19 +95,20 @@ is killed rather than left running. Pick one of two ways to install them.
 **A. Setup script: every session in this environment.** Paste this into the
 environment's **Setup script**. It installs the CLI and adds the Stop hook to
 the container's user settings (`~/.claude/settings.json`), merged with whatever
-is already there, so it covers every repository you open in the environment and
+is already there (it stops, without writing, if the CLI install fails or the existing file is not valid JSON), so it covers every repository you open in the environment and
 nothing is committed. The setup script cannot read the environment's variables
 or secrets, and does not need to.
 
 ```bash
 #!/bin/bash
+set -e
 npm i -g tokens-cli@latest
 mkdir -p ~/.claude
 node -e '
 const fs = require("fs");
 const file = process.env.HOME + "/.claude/settings.json";
 let settings = {};
-try { settings = JSON.parse(fs.readFileSync(file, "utf8")); } catch {}
+try { settings = JSON.parse(fs.readFileSync(file, "utf8")); } catch (err) { if (err.code !== "ENOENT") throw err; }
 const command = "tokens cloud submit >/dev/null 2>&1; true";
 const hooks = (settings.hooks ??= {});
 const stop = (hooks.Stop ??= []);

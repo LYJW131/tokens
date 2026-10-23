@@ -79,13 +79,14 @@ const WINDOWS: readonly DocCommand[] = [
 // async with a timeout, so a submit never holds up a turn and a stalled install
 // or request is killed.
 const CLOUD_SETUP_SCRIPT = String.raw`#!/bin/bash
+set -e
 npm i -g tokens-cli@latest
 mkdir -p ~/.claude
 node -e '
 const fs = require("fs");
 const file = process.env.HOME + "/.claude/settings.json";
 let settings = {};
-try { settings = JSON.parse(fs.readFileSync(file, "utf8")); } catch {}
+try { settings = JSON.parse(fs.readFileSync(file, "utf8")); } catch (err) { if (err.code !== "ENOENT") throw err; }
 const command = "tokens cloud submit >/dev/null 2>&1; true";
 const hooks = (settings.hooks ??= {});
 const stop = (hooks.Stop ??= []);
@@ -388,6 +389,9 @@ export default function DocsPage() {
                   <code>Authorization: Bearer &lt;token&gt;</code>. The egress
                   proxy adds it on the way out, so the token never sits in the
                   container where the agent and anything it runs could read it.
+                  It can still be used from inside a running session, as with
+                  an environment variable, so add it only to environments whose
+                  repositories you trust.
                 </p>
                 <p>
                   Then add the environment variables{" "}
