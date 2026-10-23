@@ -83,3 +83,51 @@ export function CommandBlock({ commands }: { commands: readonly DocCommand[] }) 
     </div>
   );
 }
+
+/**
+ * A copyable multi-line file or script, for snippets a reader pastes whole
+ * (a settings file, a setup script) rather than runs line by line.
+ */
+export function CodeBlock({ code, label }: { code: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      // Same as CommandBlock: the text stays selectable.
+    }
+  };
+
+  return (
+    <div className="overflow-hidden rounded-lg border">
+      <div className="flex items-center justify-between gap-3 border-b bg-muted/70 px-3 py-1.5 sm:px-4">
+        <span className="truncate font-mono text-xs text-muted-foreground">{label}</span>
+        <button
+          type="button"
+          onClick={copy}
+          aria-label={`Copy ${label}`}
+          className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          {copied ? (
+            <CheckIcon className="size-3.5 text-foreground" />
+          ) : (
+            <CopyIcon className="size-3.5" />
+          )}
+        </button>
+        <span role="status" aria-live="polite" className="sr-only">
+          {copied ? `Copied ${label}` : ""}
+        </span>
+      </div>
+      {/* tabIndex for keyboard scrolling of long lines, as in CommandBlock. */}
+      <pre
+        tabIndex={0}
+        className="overflow-x-auto bg-muted/40 px-3 py-3 font-mono text-[12px] leading-relaxed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-4"
+      >
+        <code>{code}</code>
+      </pre>
+    </div>
+  );
+}

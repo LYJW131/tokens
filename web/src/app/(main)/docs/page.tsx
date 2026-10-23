@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { CommandBlock, type DocCommand } from "@/components/docs/CommandBlock";
+import { CodeBlock, CommandBlock, type DocCommand } from "@/components/docs/CommandBlock";
 import { BrandGlyph } from "@/components/profile/ModelIcon";
 import { CONTAINER } from "@/components/layout/Container";
 import {
@@ -74,6 +74,60 @@ const WINDOWS: readonly DocCommand[] = [
   { command: "bunx tokens-cli@latest login", note: "link your GitHub account" },
   { command: "bunx tokens-cli@latest submit", note: "submit your usage" },
 ];
+
+// Cloud session setup, kept in step with docs/cloud-sessions.md. Both hooks run
+// async with a timeout, so a submit never holds up a turn and a stalled install
+// or request is killed.
+const CLOUD_SETUP_SCRIPT = String.raw`#!/bin/bash
+npm i -g tokens-cli@latest
+mkdir -p ~/.claude
+node -e '
+const fs = require("fs");
+const file = process.env.HOME + "/.claude/settings.json";
+let settings = {};
+try { settings = JSON.parse(fs.readFileSync(file, "utf8")); } catch {}
+const command = "tokens cloud submit >/dev/null 2>&1; true";
+const hooks = (settings.hooks ??= {});
+const stop = (hooks.Stop ??= []);
+if (!JSON.stringify(stop).includes("tokens cloud submit")) {
+  stop.push({ hooks: [{ type: "command", command, async: true, timeout: 120 }] });
+}
+fs.writeFileSync(file, JSON.stringify(settings, null, 2) + "\n");
+'`;
+
+const CLOUD_REPO_HOOKS = JSON.stringify(
+  {
+    hooks: {
+      SessionStart: [
+        {
+          hooks: [
+            {
+              type: "command",
+              command:
+                '[ "$CLAUDE_CODE_REMOTE" = true ] && ! command -v tokens >/dev/null && npm i -g tokens-cli@latest >/dev/null 2>&1; true',
+              async: true,
+              timeout: 180,
+            },
+          ],
+        },
+      ],
+      Stop: [
+        {
+          hooks: [
+            {
+              type: "command",
+              command: "command -v tokens >/dev/null && tokens cloud submit >/dev/null 2>&1; true",
+              async: true,
+              timeout: 120,
+            },
+          ],
+        },
+      ],
+    },
+  },
+  null,
+  2
+);
 
 /**
  * Platform marks. Apple and Microsoft come from the shared brand set so they
@@ -310,6 +364,105 @@ export default function DocsPage() {
               { command: "tokens help", note: "everything else" },
             ]}
           />
+        </Section>
+
+        <Section
+          id="cloud"
+          title="Cloud sessions"
+          description="Claude Code on the web runs in a cloud VM that tokens serve never sees. An end-of-turn hook in the session reports it instead, with the same totals-only payload; each session is its own device, keyed by a hash of the session id."
+        >
+          <div className="flex flex-col gap-4">
+            <Card size="sm">
+              <CardHeader>
+                <CardTitle className="text-sm">1. Give the proxy your token</CardTitle>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-2 text-sm leading-relaxed text-muted-foreground">
+                <p>
+                  Create a token in{" "}
+                  <a href="/settings" className="underline underline-offset-4 hover:text-foreground">
+                    Settings
+                  </a>
+                  . In the cloud environment&apos;s settings, add it under{" "}
+                  <strong className="font-medium text-foreground">Network secrets</strong>{" "}
+                  for host <code>tokens.ci</code>, sent as{" "}
+                  <code>Authorization: Bearer &lt;token&gt;</code>. The egress
+                  proxy adds it on the way out, so the token never sits in the
+                  container where the agent and anything it runs could read it.
+                </p>
+                <p>
+                  Then add the environment variables{" "}
+                  <code>TOKENS_API_TOKEN=injected-by-proxy</code> (a placeholder:
+                  the CLI will not submit without a token, and the proxy replaces
+                  the header) and <code>TZ=Asia/Shanghai</code> or your own zone,
+                  so days are counted in your timezone. Without network secrets,
+                  set <code>TOKENS_API_TOKEN</code> to the token itself.
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card size="sm">
+              <CardHeader>
+                <CardTitle className="text-sm">2. Allow the network</CardTitle>
+              </CardHeader>
+              <CardContent className="text-sm leading-relaxed text-muted-foreground">
+                Allow <code>tokens.ci</code>, the npm registry, and{" "}
+                <code>models.dev</code> and <code>openrouter.ai</code> for
+                pricing.
+              </CardContent>
+            </Card>
+
+            <Card size="sm">
+              <CardHeader>
+                <CardTitle className="text-sm">3. Install the hook, one of two ways</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Tabs defaultValue="setup-script">
+                  <TabsList>
+                    <TabsTrigger value="setup-script">Setup script</TabsTrigger>
+                    <TabsTrigger value="repo-hooks">Repository hooks</TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value="setup-script" className="mt-4 flex flex-col gap-3">
+                    <p className="text-sm leading-relaxed text-muted-foreground">
+                      Paste into the environment&apos;s Setup script. It installs
+                      the CLI and merges the Stop hook into the container&apos;s{" "}
+                      <code>~/.claude/settings.json</code>, so it covers every
+                      repository opened in that environment and nothing is
+                      committed.
+                    </p>
+                    <CodeBlock code={CLOUD_SETUP_SCRIPT} label="Setup script" />
+                  </TabsContent>
+
+                  <TabsContent value="repo-hooks" className="mt-4 flex flex-col gap-3">
+                    <p className="text-sm leading-relaxed text-muted-foreground">
+                      Commit to the repository&apos;s{" "}
+                      <code>.claude/settings.json</code>. It applies to that
+                      repository in any environment and installs the CLI itself.
+                      On a local machine both hooks do nothing.
+                    </p>
+                    <CodeBlock code={CLOUD_REPO_HOOKS} label=".claude/settings.json" />
+                  </TabsContent>
+                </Tabs>
+              </CardContent>
+            </Card>
+
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              The hooks run async, with a timeout, so a submit never holds up a
+              turn. Use one way, not both. Run{" "}
+              <code>tokens cloud status</code> in a session to check it is
+              detected. Codex cloud is not supported: its agent does not run in
+              the container. Details and anti-cheat rules are in{" "}
+              <a
+                href="https://github.com/missuo/tokens/blob/main/docs/cloud-sessions.md"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline underline-offset-4 hover:text-foreground"
+              >
+                cloud-sessions.md
+              </a>
+              .
+            </p>
+          </div>
         </Section>
 
         <Section
