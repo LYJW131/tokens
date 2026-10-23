@@ -53,35 +53,104 @@ On public profiles all of a provider's sessions are shown as one row
 
 ## Claude Code on the web
 
-1. Create a token in [Settings](https://tokens.ci/settings) and add it to the
-   cloud environment's **environment variables** as `TOKENS_API_TOKEN`. Add
-   `TZ=<your IANA zone>` (e.g. `TZ=Asia/Shanghai`) so days are bucketed in your
-   timezone rather than the container's UTC.
-2. Allow `tokens.ci` (and the npm registry, to install the CLI) in the
-   environment's network access settings. Also allow `models.dev` and
-   `openrouter.ai`: without them the pricing fetch fails and costs are
-   computed from the remaining pricing sources only.
-3. Commit these hooks to the repository's `.claude/settings.json`:
+All of this is set in the cloud environment's settings (the gear beside the
+environment in the environment menu), except the hooks file in option B below.
+
+### 1. API token: network secret, not an environment variable
+
+Create a token in [Settings](https://tokens.ci/settings). Prefer to give it to
+the environment's egress proxy rather than to the container:
+
+- **Recommended: Network secrets** (labelled API credentials in older apps).
+  Add a secret for host `tokens.ci` that sends
+  `Authorization: Bearer <your token>`. The proxy adds it to requests to
+  tokens.ci on their way out, so the token is never inside the container, where
+  the agent, the repository's scripts and anything they install could read it.
+  Then add the environment variable `TOKENS_API_TOKEN=injected-by-proxy`: the
+  CLI refuses to submit without a token, and this placeholder is the
+  `Authorization` header the proxy replaces with the real one. This keeps the
+  token from being read or copied out, not from being used: while a session
+  runs, anything in it can still send requests to tokens.ci with your token
+  (as it can with the environment variable), including the ones that delete
+  your submitted data. Only add it to environments whose repositories you
+  trust, and revoke it in Settings if in doubt.
+- **Otherwise: environment variable.** Set `TOKENS_API_TOKEN` to the token
+  itself. It works the same, but every process in the session can read it.
+
+Also add `TZ=<your IANA zone>` (e.g. `TZ=Asia/Shanghai`) so days are bucketed in
+your timezone rather than the container's UTC.
+
+### 2. Network access
+
+Allow `tokens.ci` and the npm registry (to install the CLI). Also allow
+`models.dev` and `openrouter.ai`: without them the pricing fetch fails and costs
+are computed from the remaining pricing sources only.
+
+### 3. Hooks
+
+There is only a Stop hook; the CLI is installed once per VM by the setup
+script. The hook is `async`, so a submit runs in the background and never holds
+up the session, and has a `timeout` (seconds) so a stalled network call is
+killed rather than left running. Pick one of two ways to install it; use A if
+you work in Claude Code project threads.
+
+**A. Setup script: every session in this environment (recommended).** Paste
+this into the environment's **Setup script**. It installs the CLI and adds the Stop hook to
+the container's user settings (`~/.claude/settings.json`), merged with whatever
+is already there (it stops, without writing, if the CLI install fails or the
+existing file is not valid JSON), so it covers every repository you open in the
+environment and nothing is committed. The setup script runs in every new VM, and
+user-level hooks run in both standalone cloud sessions and the threads of a
+Claude Code project. The setup script cannot read the environment's variables
+or secrets, and does not need to.
+
+```bash
+#!/bin/bash
+set -e
+npm i -g tokens-cli@latest
+mkdir -p ~/.claude
+node -e '
+const fs = require("fs");
+const file = process.env.HOME + "/.claude/settings.json";
+let settings = {};
+try { settings = JSON.parse(fs.readFileSync(file, "utf8")); } catch (err) { if (err.code !== "ENOENT") throw err; }
+const command = "tokens cloud submit >/dev/null 2>&1; true";
+const hooks = (settings.hooks ??= {});
+const stop = (hooks.Stop ??= []);
+if (!JSON.stringify(stop).includes("tokens cloud submit")) {
+  stop.push({ hooks: [{ type: "command", command, async: true, timeout: 120 }] });
+}
+fs.writeFileSync(file, JSON.stringify(settings, null, 2) + "\n");
+'
+```
+
+**B. Hooks file in the repository: every session on this repository.** The
+CLI is still installed once per VM by the setup script, which then only needs
+its first lines:
+
+```bash
+#!/bin/bash
+npm i -g tokens-cli@latest
+```
+
+and the Stop hook is committed to the repository's `.claude/settings.json`
+(merge it in if the file exists), so it travels with the repository instead of
+the environment. **Threads in a Claude Code project do not run a repository's
+`.claude/settings.json` hooks**, only the container's user-level ones, so their
+usage is not reported this way; use A for those. Standalone cloud sessions
+(including scheduled ones) do run them.
 
 ```json
 {
   "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "[ \"$CLAUDE_CODE_REMOTE\" = true ] && ! command -v tokens >/dev/null && npm i -g tokens-cli@latest >/dev/null 2>&1; true"
-          }
-        ]
-      }
-    ],
     "Stop": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "command -v tokens >/dev/null && tokens cloud submit >/dev/null 2>&1; true"
+            "command": "command -v tokens >/dev/null && tokens cloud submit >/dev/null 2>&1; true",
+            "async": true,
+            "timeout": 120
           }
         ]
       }
@@ -90,10 +159,19 @@ On public profiles all of a provider's sessions are shown as one row
 }
 ```
 
+Use one of the two, not both, or every turn submits twice (harmless, since a
+submit replaces the session's stored total, but wasted).
+
 The provider and session are detected from `CLAUDE_CODE_REMOTE` and
 `CLAUDE_CODE_REMOTE_SESSION_ID`. On a local machine `tokens cloud submit` finds
-no cloud session and does nothing, so the hooks are safe for teammates who work
-locally.
+no cloud session and does nothing, so the committed hooks are safe for
+teammates who work locally, and the hook does nothing where the CLI is not
+installed.
+
+`tokens cloud status` in the session shows whether it is detected and which
+device it submits as.
+
+### Submit frequency
 
 Every Stop hook submits, one request per turn. There is no reliable hook for
 the end of a cloud session, so a turn that is skipped may never be caught up.
