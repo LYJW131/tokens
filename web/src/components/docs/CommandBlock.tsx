@@ -124,7 +124,7 @@ export function CodeBlock({ code, label }: { code: string; label: string }) {
       {/* tabIndex for keyboard scrolling of long lines, as in CommandBlock. */}
       <pre
         tabIndex={0}
-        className="overflow-x-auto bg-muted/40 px-3 py-3 font-mono text-[12px] leading-relaxed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-4"
+        className="overflow-x-auto bg-muted/40 px-3 py-3 font-mono text-[12px] leading-relaxed [font-variant-ligatures:none] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-4"
       >
         <code>{code}</code>
       </pre>
